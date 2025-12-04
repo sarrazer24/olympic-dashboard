@@ -21,9 +21,9 @@ st.set_page_config(
 def load_data():
     """Load all CSV files from the data directory"""
     data_dir = Path(__file__).parent / "data"
-    
+
     data = {}
-    
+
     try:
         # Load main datasets
         data['athletes'] = pd.read_csv(data_dir / 'athletes.csv')
@@ -38,7 +38,7 @@ def load_data():
         data['technical_officials'] = pd.read_csv(data_dir / 'technical_officials.csv')
         data['venues'] = pd.read_csv(data_dir / 'venues.csv')
         data['torch_route'] = pd.read_csv(data_dir / 'torch_route.csv')
-        
+
         # Create continent mapping
         continent_mapping = {
             'USA': 'North America', 'CAN': 'North America', 'MEX': 'North America',
@@ -49,16 +49,30 @@ def load_data():
             'RSA': 'Africa', 'EGY': 'Africa', 'NGR': 'Africa', 'KEN': 'Africa', 'ETH': 'Africa',
             'RUS': 'Europe', 'KAZ': 'Asia', 'UZB': 'Asia', 'TUR': 'Europe', 'IRN': 'Asia', 'ISR': 'Asia',
         }
-        
+
         # Add continent to medals_total
         if 'country_code' in data['medals_total'].columns:
             data['medals_total']['continent'] = data['medals_total']['country_code'].map(continent_mapping).fillna('Other')
-        
-        # Extract unique sports
-        data['unique_sports'] = sorted(data['events']['sport'].unique().tolist()) if 'sport' in data['events'].columns else []
-        
+
+        # Extract unique sports from events data
+        if not data['events'].empty:
+            # Try different column names for sport
+            sport_column = None
+            for col in data['events'].columns:
+                if col.lower() == 'sport':
+                    sport_column = col
+                    break
+            
+            if sport_column:
+                unique_sports = data['events'][sport_column].dropna().unique().tolist()
+                data['unique_sports'] = sorted([s for s in unique_sports if isinstance(s, str)])
+            else:
+                data['unique_sports'] = []
+        else:
+            data['unique_sports'] = []
+
         return data
-    
+
     except Exception as e:
         st.error(f"Error loading data: {e}")
         return {}
@@ -67,54 +81,307 @@ def load_data():
 def render_theme_toggle():
     """Render theme toggle button at top right corner"""
     col1, col2, col3 = st.columns([1, 1, 0.15])
-    
+
     with col3:
         current_theme = st.session_state.get("theme", "light")
         theme_emoji = "🌙" if current_theme == "light" else "☀️"
         theme_label = "Dark" if current_theme == "light" else "Light"
-        
+
         if st.button(f"{theme_emoji}", help=f"Switch to {theme_label} Mode", key=f"theme_toggle_{id(st)}"):
             st.session_state["theme"] = "dark" if current_theme == "light" else "light"
             st.rerun()
+
+# ==================== FILTER FUNCTIONS ====================
+def filter_medals_data(medals_df, medal_filters, selected_countries, selected_continent):
+    """
+    Filter medals data based on selected filters
+    """
+    if medals_df.empty:
+        return medals_df, []
+    
+    filtered_df = medals_df.copy()
+    
+    # Filter by medal type
+    medal_cols = []
+    
+    # Check what type of medal_filters we have (dictionary or list)
+    if isinstance(medal_filters, dict):
+        # It's a dictionary from the main app sidebar
+        if medal_filters.get('gold', True):
+            if 'gold_medals' in filtered_df.columns:
+                medal_cols.append('gold_medals')
+            elif 'Gold Medal' in filtered_df.columns:
+                medal_cols.append('Gold Medal')
+            elif 'gold' in filtered_df.columns:
+                medal_cols.append('gold')
+                
+        if medal_filters.get('silver', True):
+            if 'silver_medals' in filtered_df.columns:
+                medal_cols.append('silver_medals')
+            elif 'Silver Medal' in filtered_df.columns:
+                medal_cols.append('Silver Medal')
+            elif 'silver' in filtered_df.columns:
+                medal_cols.append('silver')
+                
+        if medal_filters.get('bronze', True):
+            if 'bronze_medals' in filtered_df.columns:
+                medal_cols.append('bronze_medals')
+            elif 'Bronze Medal' in filtered_df.columns:
+                medal_cols.append('Bronze Medal')
+            elif 'bronze' in filtered_df.columns:
+                medal_cols.append('bronze')
+    else:
+        # It's a list from somewhere else
+        for medal_type in medal_filters:
+            if medal_type == 'Gold':
+                if 'gold_medals' in filtered_df.columns:
+                    medal_cols.append('gold_medals')
+                elif 'Gold Medal' in filtered_df.columns:
+                    medal_cols.append('Gold Medal')
+                elif 'gold' in filtered_df.columns:
+                    medal_cols.append('gold')
+            elif medal_type == 'Silver':
+                if 'silver_medals' in filtered_df.columns:
+                    medal_cols.append('silver_medals')
+                elif 'Silver Medal' in filtered_df.columns:
+                    medal_cols.append('Silver Medal')
+                elif 'silver' in filtered_df.columns:
+                    medal_cols.append('silver')
+            elif medal_type == 'Bronze':
+                if 'bronze_medals' in filtered_df.columns:
+                    medal_cols.append('bronze_medals')
+                elif 'Bronze Medal' in filtered_df.columns:
+                    medal_cols.append('Bronze Medal')
+                elif 'bronze' in filtered_df.columns:
+                    medal_cols.append('bronze')
+            elif medal_type == 'Total' and 'total_medals' in filtered_df.columns:
+                medal_cols.append('total_medals')
+    
+    # Filter by country
+    if selected_countries:
+        country_col = 'country_long' if 'country_long' in filtered_df.columns else 'country'
+        if country_col in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df[country_col].isin(selected_countries)]
+    
+    # Filter by continent
+    if selected_continent:
+        if isinstance(selected_continent, list):
+            if selected_continent and selected_continent != ["All"] and 'continent' in filtered_df.columns:
+                filtered_df = filtered_df[filtered_df['continent'].isin(selected_continent)]
+        else:
+            if selected_continent != "All" and 'continent' in filtered_df.columns:
+                filtered_df = filtered_df[filtered_df['continent'] == selected_continent]
+    
+    return filtered_df, medal_cols
+
+def filter_athletes_data(athletes_df, selected_countries, selected_sports, selected_continent):
+    """
+    Filter athletes data based on selected filters
+    """
+    if athletes_df.empty:
+        return athletes_df
+    
+    filtered_df = athletes_df.copy()
+    
+    # Filter by country
+    if selected_countries:
+        country_col = 'country_long' if 'country_long' in filtered_df.columns else 'country'
+        if country_col in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df[country_col].isin(selected_countries)]
+    
+    # Filter by sport
+    if selected_sports:
+        if 'sport' in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df['sport'].isin(selected_sports)]
+    
+    # Filter by continent (if continent column exists)
+    if selected_continent and 'continent' in filtered_df.columns:
+        if isinstance(selected_continent, list):
+            if selected_continent:
+                filtered_df = filtered_df[filtered_df['continent'].isin(selected_continent)]
+        else:
+            if selected_continent != "All":
+                filtered_df = filtered_df[filtered_df['continent'] == selected_continent]
+    
+    return filtered_df
+
+def filter_events_data(events_df, selected_sports, selected_countries):
+    """
+    Filter events data based on selected filters
+    """
+    if events_df.empty:
+        return events_df
+    
+    filtered_df = events_df.copy()
+    
+    # Filter by sport
+    if selected_sports:
+        # Find sport column (case-insensitive)
+        sport_col = None
+        for col in filtered_df.columns:
+            if col.lower() == 'sport':
+                sport_col = col
+                break
+        
+        if sport_col:
+            filtered_df = filtered_df[filtered_df[sport_col].isin(selected_sports)]
+    
+    # Filter by country (if country column exists)
+    if selected_countries:
+        country_col = None
+        for col in filtered_df.columns:
+            if 'country' in col.lower():
+                country_col = col
+                break
+        
+        if country_col:
+            filtered_df = filtered_df[filtered_df[country_col].isin(selected_countries)]
+    
+    return filtered_df
 
 # ==================== SIDEBAR FUNCTIONS ====================
 def render_sidebar(active_page="dashboard", data=None):
     """Render consistent sidebar across all pages with navigation and filters"""
     if data is None:
         data = {}
-    
+
     with st.sidebar:
-        # Inject custom CSS for compact sidebar
+        # Inject custom CSS to remove ONLY the logo spacer, not the collapse button
         st.markdown("""
         <style>
+        /* HIDE ONLY THE LOGO SPACER, NOT THE COLLAPSE BUTTON */
+        [data-testid="stLogoSpacer"] {
+            display: none !important;
+            height: 0 !important;
+            min-height: 0 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+        }
+        
+        .st-emotion-cache-11ukie {
+            display: none !important;
+            height: 0 !important;
+            min-height: 0 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+        }
+        
+        /* Keep the header and collapse button but adjust positioning */
+        [data-testid="stSidebarHeader"] {
+            padding-top: 0 !important;
+            margin-top: 0 !important;
+            min-height: 0 !important;
+            height: auto !important;
+        }
+        
+        .st-emotion-cache-10p9htt {
+            padding-top: 0 !important;
+            margin-top: 0 !important;
+            min-height: 0 !important;
+            height: auto !important;
+        }
+        
+        /* Keep the collapse button visible and properly positioned */
+        [data-testid="stSidebarCollapseButton"] {
+            position: absolute !important;
+            top: 10px !important;
+            right: 10px !important;
+            z-index: 1000 !important;
+        }
+        
+        .st-emotion-cache-13veyas {
+            position: absolute !important;
+            top: 10px !important;
+            right: 10px !important;
+            z-index: 1000 !important;
+        }
+        
+        /* Adjust the collapse button styling for better visibility */
+        [data-testid="stSidebarCollapseButton"] button {
+            background-color: rgba(0, 133, 202, 0.9) !important;
+            border-radius: 50% !important;
+            width: 30px !important;
+            height: 30px !important;
+            min-width: 30px !important;
+            min-height: 30px !important;
+            padding: 0 !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+        }
+        
+        /* Remove any residual padding from the sidebar */
+        [data-testid="stSidebar"] {
+            padding-top: 0 !important;
+        }
+        
         [data-testid="stSidebar"] > div:first-child {
-            padding-top: 8px !important;
-            padding-bottom: 8px !important;
+            padding-top: 0 !important;
+            padding-bottom: 0 !important;
         }
-        [data-testid="stSidebarNav"] {
-            margin-bottom: 0px !important;
+        
+        /* Ensure the sidebar content starts at the very top */
+        [data-testid="stSidebarUserContent"] {
+            padding-top: 40px !important; /* Make room for the collapse button */
+            margin-top: 0 !important;
         }
-        .css-1d391kg, .css-1v0mbdj, .css-1c7y2kd {
-            margin-bottom: 2px !important;
+        
+        /* Style for multiselect tags */
+        .stMultiSelect [data-baseweb=tag] {
+            background-color: #0085CA !important;
+            color: white !important;
+        }
+        
+        /* Force black text in dropdowns */
+        .stSelectbox, .stMultiSelect {
+            color: #000000 !important;
+        }
+        div[data-baseweb="select"] input, div[data-baseweb="select"] div {
+            color: #000000 !important;
         }
         </style>
         """, unsafe_allow_html=True)
 
         import os
         logo_path = "figures/olympic_logo.png"
-        st.markdown("""
-        <div style='margin:0; padding:0; display:flex; flex-direction:column; align-items:center; justify-content:flex-start;'>
-        """, unsafe_allow_html=True)
+        
+        # Display the logo with equal padding top and bottom
         if os.path.exists(logo_path):
-            st.image(logo_path, width=100)
-        else:
+            # Add equal padding top and bottom using markdown
             st.markdown("""
-            <div style='width:100px; height:100px; background:#eee; border-radius:50%; display:flex; align-items:center; justify-content:center;'>
-                <span style='font-size:2em;'>🏅</span>
-            </div>
-            <div style='color:#EE334E; font-size:0.8em; text-align:center;'>Olympic logo not found</div>
+            <div style='padding: 10px 0 10px 0; text-align: center; margin: 0;'>
             """, unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+            
+            # Use st.image directly with center alignment
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col2:
+                st.image(logo_path, width=100, output_format="PNG")
+            
+            st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            # Fallback logo with equal padding
+            st.markdown("""
+            <div style='padding: 10px 0 10px 0; text-align: center; margin: 0;'>
+                <div style='
+                    width: 100px;
+                    height: 100px;
+                    background: linear-gradient(135deg, #0085CA, #EE334E);
+                    border-radius: 50%;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                '>
+                    <span style='font-size: 2.5em; color: white;'>🏅</span>
+                </div>
+                <div style='
+                    color: #EE334E;
+                    font-size: 0.8em;
+                    text-align: center;
+                    font-weight: 600;
+                    margin-top: 5px;
+                '>Olympic Games</div>
+            </div>
+            """, unsafe_allow_html=True)
 
         st.markdown("---")
 
@@ -122,14 +389,28 @@ def render_sidebar(active_page="dashboard", data=None):
         with st.expander("📍 Navigation", expanded=True):
             pages = {
                 "dashboard": ("🏠 Dashboard", "app"),
-                "overview": ("🏠 Overview", "1_🏠_Overview"),
+                "overview": ("📊 Overview", "1_🏠_Overview"),
                 "global": ("🗺️ Global Analysis", "2_🗺️_Global_Analysis"),
                 "athlete": ("👤 Athlete Performance", "3_👤_Athlete_Performance"),
                 "sports": ("🏟️ Sports & Events", "4_🏟️_Sports_and_Events"),
             }
             for page_key, (label, page_file) in pages.items():
                 if page_key == active_page:
-                    st.markdown(f"<div style='background:linear-gradient(135deg,#0085CA 0%,#EE334E 100%);color:white;padding:8px 10px;border-radius:6px;margin-bottom:4px;font-weight:600;font-size:0.9em;border-left:3px solid #FFD700;'>{label} ✓</div>", unsafe_allow_html=True)
+                    st.markdown(f"""
+                    <div style='
+                        background: linear-gradient(135deg, #0085CA 0%, #EE334E 100%);
+                        color: white;
+                        padding: 8px 12px;
+                        border-radius: 8px;
+                        margin: 2px 0;
+                        font-weight: 600;
+                        font-size: 0.9em;
+                        border-left: 3px solid #FFD700;
+                        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                    '>
+                        {label} ✓
+                    </div>
+                    """, unsafe_allow_html=True)
                 else:
                     if st.button(label, key=f"nav_{page_key}", use_container_width=True):
                         if page_key == "dashboard":
@@ -139,11 +420,15 @@ def render_sidebar(active_page="dashboard", data=None):
 
         # Group filters in expander
         with st.expander("🔍 Filters", expanded=True):
+            # Countries filter
             countries = []
-            if 'medals_total' in data:
+            if 'medals_total' in data and not data['medals_total'].empty:
                 medals_df = data['medals_total']
                 if 'country_long' in medals_df.columns:
-                    countries = sorted(medals_df['country_long'].unique().tolist())
+                    countries = sorted([c for c in medals_df['country_long'].dropna().unique().tolist() if isinstance(c, str)])
+                elif 'country' in medals_df.columns:
+                    countries = sorted([c for c in medals_df['country'].dropna().unique().tolist() if isinstance(c, str)])
+            
             selected_countries = st.multiselect(
                 "🌍 Countries",
                 options=countries,
@@ -152,9 +437,27 @@ def render_sidebar(active_page="dashboard", data=None):
                 help="Leave empty to show all countries",
             )
 
+            # Sports filter - Get from events data
             sports = []
-            if 'events' in data and 'sport' in data['events'].columns:
-                sports = sorted(data['events']['sport'].unique().tolist())
+            if 'events' in data and not data['events'].empty:
+                events_df = data['events']
+                # Find sport column (case-insensitive)
+                sport_col = None
+                for col in events_df.columns:
+                    if col.lower() == 'sport':
+                        sport_col = col
+                        break
+                
+                if sport_col:
+                    sports = sorted([s for s in events_df[sport_col].dropna().unique().tolist() if isinstance(s, str)])
+            
+            # If no sports found, try athletes data
+            if not sports and 'athletes' in data and not data['athletes'].empty:
+                athletes_df = data['athletes']
+                if 'sport' in athletes_df.columns:
+                    sports = sorted([s for s in athletes_df['sport'].dropna().unique().tolist() if isinstance(s, str)])
+            
+            # Create sports filter
             selected_sports = st.multiselect(
                 "⚽ Sports",
                 options=sports,
@@ -163,25 +466,28 @@ def render_sidebar(active_page="dashboard", data=None):
                 help="Leave empty to show all sports",
             )
 
+            # Continents filter
             continents = []
-            if 'medals_total' in data and 'continent' in data['medals_total'].columns:
-                continents = sorted(data['medals_total']['continent'].unique().tolist())
+            if 'medals_total' in data and not data['medals_total'].empty and 'continent' in data['medals_total'].columns:
+                continents = sorted([c for c in data['medals_total']['continent'].dropna().unique().tolist() if isinstance(c, str)])
+            
             selected_continent = st.multiselect(
                 "🌎 Continents",
                 options=continents,
-                default=continents,
+                default=continents if continents else [],
                 key="continent_filter",
-                help="Uncheck to exclude continents",
+                help="Select continents to include",
             )
 
             # Medal types
+            st.markdown("**Medal Types:**")
             col1, col2, col3 = st.columns(3, gap="small")
             with col1:
-                include_gold = st.checkbox("Gold", value=True, key="medal_gold")
+                include_gold = st.checkbox("🥇 Gold", value=True, key="medal_gold")
             with col2:
-                include_silver = st.checkbox("Silver", value=True, key="medal_silver")
+                include_silver = st.checkbox("🥈 Silver", value=True, key="medal_silver")
             with col3:
-                include_bronze = st.checkbox("Bronze", value=True, key="medal_bronze")
+                include_bronze = st.checkbox("🥉 Bronze", value=True, key="medal_bronze")
             medal_filters = {
                 'gold': include_gold,
                 'silver': include_silver,
@@ -190,21 +496,8 @@ def render_sidebar(active_page="dashboard", data=None):
 
     return selected_countries, selected_sports, selected_continent, medal_filters
 
-
 # ==================== MAIN APP ====================
 def main():
-    # Inject improved CSS to fully remove sidebar navigation menu and top padding
-    st.markdown("""
-        <style>
-        [data-testid="stSidebarNav"] {
-            display: none !important;
-        }
-        [data-testid="stSidebar"] > div:first-child {
-            padding-top: 0 !important;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-
     # Load data
     with st.spinner("Loading data..."):
         data = load_data()
@@ -257,8 +550,14 @@ def main():
     events_df = data.get('events', pd.DataFrame())
     if not events_df.empty:
         if selected_sports:
-            if 'sport' in events_df.columns:
-                events_df = events_df[events_df['sport'].isin(selected_sports)]
+            # Find sport column
+            sport_col = None
+            for col in events_df.columns:
+                if col.lower() == 'sport':
+                    sport_col = col
+                    break
+            if sport_col:
+                events_df = events_df[events_df[sport_col].isin(selected_sports)]
         if selected_countries:
             if 'country_long' in events_df.columns:
                 events_df = events_df[events_df['country_long'].isin(selected_countries)]
@@ -307,76 +606,70 @@ def main():
             </div>
         </div>
     """, unsafe_allow_html=True)
-    
-   
-    
+
+    st.markdown("""
+    <style>
+    .nav-card {
+        width: 100%;
+    }
+    .nav-card .stButton > button {
+        color: white !important;
+        padding: 20px !important;
+        border-radius: 10px !important;
+        border: none !important;
+        text-align: center !important;
+        font-size: 1em !important;
+        width: 100% !important;
+        height: auto !important;
+        transition: transform 0.3s ease !important;
+        white-space: pre-line !important;
+    }
+    .nav-card .stButton > button:hover {
+        transform: translateY(-5px) !important;
+    }
+    .overview-card .stButton > button {
+        background: linear-gradient(135deg, #0085CA, #0066A1) !important;
+    }
+    .global-card .stButton > button {
+        background: linear-gradient(135deg, #FFD700, #E6C200) !important;
+        color: #333 !important;
+    }
+    .athlete-card .stButton > button {
+        background: linear-gradient(135deg, #EE334E, #CC1A33) !important;
+    }
+    .sports-card .stButton > button {
+        background: linear-gradient(135deg, #009F3D, #007A2F) !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     # Navigation cards
     col1, col2, col3, col4 = st.columns(4)
-    
+
     with col1:
-        st.markdown("""
-        <div style="
-            background: linear-gradient(135deg, #0085CA, #0066A1);
-            padding: 20px;
-            border-radius: 10px;
-            color: white;
-            text-align: center;
-            transition: transform 0.3s ease;
-        ">
-            <div style="font-size: 1.8em; margin-bottom: 8px;">🏠</div>
-            <strong>Overview</strong>
-            <p style="font-size: 0.85em; margin-bottom: 0; opacity: 0.9;">KPIs & Medal Distribution</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
+        st.markdown('<div class="nav-card overview-card">', unsafe_allow_html=True)
+        if st.button("🏠\nOverview\nKPIs & Medal Distribution", key="overview_card", use_container_width=True):
+            st.switch_page("pages/1_🏠_Overview.py")
+        st.markdown('</div>', unsafe_allow_html=True)
+
     with col2:
-        st.markdown("""
-        <div style="
-            background: linear-gradient(135deg, #FFD700, #E6C200);
-            padding: 20px;
-            border-radius: 10px;
-            color: #333;
-            text-align: center;
-            transition: transform 0.3s ease;
-        ">
-            <div style="font-size: 1.8em; margin-bottom: 8px;">🗺️</div>
-            <strong>Global Analysis</strong>
-            <p style="font-size: 0.85em; margin-bottom: 0; opacity: 0.9;">Worldwide Patterns</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
+        st.markdown('<div class="nav-card global-card">', unsafe_allow_html=True)
+        if st.button("🗺️\nGlobal Analysis\nWorldwide Patterns", key="global_card", use_container_width=True):
+            st.switch_page("pages/2_🗺️_Global_Analysis.py")
+        st.markdown('</div>', unsafe_allow_html=True)
+
     with col3:
-        st.markdown("""
-        <div style="
-            background: linear-gradient(135deg, #EE334E, #CC1A33);
-            padding: 20px;
-            border-radius: 10px;
-            color: white;
-            text-align: center;
-            transition: transform 0.3s ease;
-        ">
-            <div style="font-size: 1.8em; margin-bottom: 8px;">👤</div>
-            <strong>Athlete Performance</strong>
-            <p style="font-size: 0.85em; margin-bottom: 0; opacity: 0.9;">Profiles & Demographics</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
+        st.markdown('<div class="nav-card athlete-card">', unsafe_allow_html=True)
+        if st.button("👤\nAthlete Performance\nProfiles & Demographics", key="athlete_card", use_container_width=True):
+            st.switch_page("pages/3_👤_Athlete_Performance.py")
+        st.markdown('</div>', unsafe_allow_html=True)
+
     with col4:
-        st.markdown("""
-        <div style="
-            background: linear-gradient(135deg, #009F3D, #007A2F);
-            padding: 20px;
-            border-radius: 10px;
-            color: white;
-            text-align: center;
-            transition: transform 0.3s ease;
-        ">
-            <div style="font-size: 1.8em; margin-bottom: 8px;">🏟️</div>
-            <strong>Sports & Events</strong>
-            <p style="font-size: 0.85em; margin-bottom: 0; opacity: 0.9;">Schedule & Venues</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
+        st.markdown('<div class="nav-card sports-card">', unsafe_allow_html=True)
+        if st.button("🏟️\nSports & Events\nSchedule & Venues", key="sports_card", use_container_width=True):
+            st.switch_page("pages/4_🏟️_Sports_and_Events.py")
+        st.markdown('</div>', unsafe_allow_html=True)
+
     # Quick stats section
     st.markdown("""
     <div style="margin: 40px 0 20px 0;">
@@ -385,7 +678,7 @@ def main():
         </h2>
     </div>
     """, unsafe_allow_html=True)
-    
+
     col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
@@ -432,7 +725,7 @@ def main():
             <div style="font-size: 0.9em; color: #666;">🎯 Total Events</div>
         </div>
         """, unsafe_allow_html=True)
-    
+
     # Stats breakdown section
     st.markdown("---")
     st.markdown("""
@@ -456,15 +749,15 @@ def main():
         </div>
     </div>
     """, unsafe_allow_html=True)
-    
+
     st.markdown("---")
-    
+
     # Footer
     st.markdown("""
     <div style="
-        text-align: center; 
-        color: #888; 
-        font-size: 0.85rem; 
+        text-align: center;
+        color: #888;
+        font-size: 0.85rem;
         margin-top: 50px;
         padding: 20px;
         background: linear-gradient(135deg, rgba(0,133,202,0.05), rgba(238,51,46,0.05));

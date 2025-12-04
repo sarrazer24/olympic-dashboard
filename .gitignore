@@ -1,0 +1,71 @@
+# =========================
+# Python cache files
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# =========================
+# Python virtual environments
+# =========================
+env/
+venv/
+ENV/
+.venv/
+
+# =========================
+# Python packaging / distribution
+# =========================
+build/
+dist/
+*.egg-info/
+*.egg
+*.whl
+
+# =========================
+# Python testing / coverage
+# =========================
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# =========================
+# Jupyter Notebook
+# =========================
+.ipynb_checkpoints
+
+# =========================
+# Streamlit
+# =========================
+.streamlit/
+
+# =========================
+# IDE / editor configs
+# =========================
+.vscode/
+.idea/
+
+# =========================
+# OS-specific files
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Logs
+# =========================
+*.log
+
+# =========================
+# Misc
+# =========================
+*.swp
+*.swo

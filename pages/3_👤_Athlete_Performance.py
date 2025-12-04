@@ -14,10 +14,12 @@ st.set_page_config(
     layout="wide"
 )
 
-# Load data from main app
-if "data" not in st.session_state:
-    st.info("Please go to the main page first to load data")
-    st.stop()
+current_theme = st.session_state.get("theme", "dark")
+if "animate_header" not in st.session_state:
+    st.session_state["animate_header"] = True
+animate_header = st.session_state.get("animate_header", True)
+st.markdown(get_theme_css(current_theme, animated=animate_header), unsafe_allow_html=True)
+render_theme_toggle()
 
 data = st.session_state.get("data", {})
 
@@ -28,8 +30,6 @@ if "theme" not in st.session_state:
 current_theme = st.session_state.get("theme", "light")
 st.markdown(get_theme_css(current_theme), unsafe_allow_html=True)
 
-# Theme toggle at top right
-render_theme_toggle()
 
 # Sidebar filters
 selected_countries, selected_sports, selected_continent, medal_filters = render_sidebar(active_page="athlete", data=data)
@@ -38,9 +38,9 @@ st.session_state['selected_sports'] = selected_sports
 st.session_state['selected_continent'] = selected_continent
 st.session_state['medal_filters'] = medal_filters
 
-# Page header
-st.markdown("""
-    <div class="olympic-banner">
+banner_class = "olympic-banner-animated" if animate_header else "olympic-banner"
+st.markdown(f"""
+    <div class="{banner_class}">
         <div class="olympic-rings">
             <span class="ring ring-blue"></span>
             <span class="ring ring-yellow"></span>
@@ -64,23 +64,6 @@ medals_data = data.get('medals', pd.DataFrame())
 medallists_data = data.get('medallists', pd.DataFrame())
 events_data = data.get('events', pd.DataFrame())
 
-# Debug: Afficher les colonnes disponibles
-with st.expander("🔍 Debug: Voir les colonnes disponibles", expanded=False):
-    if not athletes_data.empty:
-        st.write("**Athletes columns:**", list(athletes_data.columns))
-        st.write("**Sample athletes:**")
-        st.dataframe(athletes_data[['name', 'country_long', 'height', 'weight', 'disciplines']].head(5), use_container_width=True)
-    
-    if not medallists_data.empty:
-        st.write("**Medallists columns:**", list(medallists_data.columns))
-        st.write("**Sample medallists:**")
-        st.dataframe(medallists_data[['name', 'medal_type', 'event', 'discipline']].head(5), use_container_width=True)
-    
-    if not coaches_data.empty:
-        st.write("**Coaches columns:**", list(coaches_data.columns))
-    
-    if not teams_data.empty:
-        st.write("**Teams columns:**", list(teams_data.columns))
 
 # Appliquer les filtres aux athlètes
 filtered_athletes = athletes_data.copy()

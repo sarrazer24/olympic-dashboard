@@ -1,10 +1,8 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.express as px
+import plotly.express as px  # Add this import
 from datetime import datetime
-
-# Import styling
 from app import get_theme_css, render_sidebar, render_theme_toggle
 
 # Page configuration
@@ -13,22 +11,22 @@ st.set_page_config(
     layout="wide"
 )
 
-# Load data from main app
-if "data" not in st.session_state:
-    st.info("Please go to the main page first to load data")
-    st.stop()
-
-data = st.session_state.get("data", {})
-
 # Initialize theme
 if "theme" not in st.session_state:
     st.session_state["theme"] = "light"
 
 current_theme = st.session_state.get("theme", "light")
-st.markdown(get_theme_css(current_theme), unsafe_allow_html=True)
+if "animate_header" not in st.session_state:
+    st.session_state["animate_header"] = True
+animate_header = st.session_state.get("animate_header", True)
 
-# Theme toggle at top right
+# Apply theme CSS
+st.markdown(get_theme_css(current_theme, animated=animate_header), unsafe_allow_html=True)
+
+# Theme toggle at top right - ONLY ONCE
 render_theme_toggle()
+
+data = st.session_state.get("data", {})
 
 # Sidebar filters
 selected_countries, selected_sports, selected_continent, medal_filters = render_sidebar(active_page="global", data=data)
@@ -37,9 +35,9 @@ st.session_state['selected_sports'] = selected_sports
 st.session_state['selected_continent'] = selected_continent
 st.session_state['medal_filters'] = medal_filters
 
-# Page header
-st.markdown("""
-    <div class="olympic-banner">
+banner_class = "olympic-banner-animated" if animate_header else "olympic-banner"
+st.markdown(f"""
+    <div class="{banner_class}">
         <div class="olympic-rings">
             <span class="ring ring-blue"></span>
             <span class="ring ring-yellow"></span>
@@ -336,7 +334,7 @@ if not filtered_medals.empty:
             st.markdown("### 📋 Detailed Data (Top 20 Countries)")
             display_data = top_20[[country_col, gold_col, silver_col, bronze_col, 'total_medals']].copy()
             display_data.columns = ['Country', '🥇 Gold', '🥈 Silver', '🥉 Bronze', 'Total Medals']
-            st.dataframe(display_data.sort_values('Total Medals', ascending=False), width='stretch', hide_index=True)
+            st.dataframe(display_data.sort_values('Total Medals', ascending=False), use_container_width=True, hide_index=True)
         else:
             st.warning("Medal columns not found in data")
     else:
