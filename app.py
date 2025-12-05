@@ -388,8 +388,8 @@ def render_sidebar(active_page="dashboard", data=None):
         # Group navigation in expander
         with st.expander("📍 Navigation", expanded=True):
             pages = {
-                "dashboard": ("🏠 Dashboard", "app"),
-                "overview": ("📊 Overview", "1_🏠_Overview"),
+                "dashboard": ("📊 Dashboard", "app"),
+                "overview": ("🏠 Overview", "1_🏠_Overview"),
                 "global": ("🗺️ Global Analysis", "2_🗺️_Global_Analysis"),
                 "athlete": ("👤 Athlete Performance", "3_👤_Athlete_Performance"),
                 "sports": ("🏟️ Sports & Events", "4_🏟️_Sports_and_Events"),
@@ -588,17 +588,10 @@ def main():
             if medal_filters.get('bronze', True):
                 medal_cols.append('bronze')
 
-    # Main page header with animated colors
+    # Main page header with animated colors - REMOVED OLYMPIC RINGS
     banner_class = "olympic-banner-animated" if animate_header else "olympic-banner"
     st.markdown(f"""
         <div class="{banner_class}">
-            <div class="olympic-rings">
-                <span class="ring ring-blue"></span>
-                <span class="ring ring-yellow"></span>
-                <span class="ring ring-black"></span>
-                <span class="ring ring-green"></span>
-                <span class="ring ring-red"></span>
-            </div>
             <div class="olympic-banner-text">
                 <h1 class="main-header">🏅 Paris 2024 Olympic Games Dashboard</h1>
                 <p class="sub-header">Interactive analysis of the world's greatest sporting event</p>

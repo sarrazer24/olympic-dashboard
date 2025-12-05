@@ -85,16 +85,38 @@ def get_theme_css(theme="light", animated=False):
                          border-radius: 10px; padding: 20px; border-left: 4px solid #0085CA; transition: transform 0.3s ease; color: var(--text-primary); }}
             .metric-card:hover {{ transform: translateY(-5px); }}
             
-            /* Olympic Rings */
-            .ring {{ display: inline-block; width: 25px; height: 25px; border: 3px solid; 
-                   border-radius: 50%; margin-right: 5px; vertical-align: middle; }}
-            .ring-blue {{ border-color: #0085CA; }}
-            .ring-yellow {{ border-color: #FFD700; }}
-            .ring-black {{ border-color: #ffffff; }}
-            .ring-green {{ border-color: #009F3D; }}
-            .ring-red {{ border-color: #EE334E; }}
-            .olympic-rings {{ margin-bottom: 20px; }}
-            .olympic-banner-text h1 {{ margin: 0; color: white; }}
+                       /* Olympic Rings in correct order */
+            .ring {{
+                display: inline-block;
+                width: 25px;
+                height: 25px;
+                border: 3px solid;
+                border-radius: 50%;
+                margin-right: 5px;
+                vertical-align: middle;
+            }}
+            .ring-blue {{
+                border-color: #0085CA;  /* Blue */
+            }}
+            .ring-yellow {{
+                border-color: #FFD700;  /* Yellow */
+            }}
+            .ring-black {{
+                border-color: #000000;  /* Black (not white) */
+            }}
+            .ring-green {{
+                border-color: #009F3D;  /* Green */
+            }}
+            .ring-red {{
+                border-color: #EE334E;  /* Red */
+            }}
+            .olympic-rings {{
+                margin-bottom: 20px;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                gap: 8px;
+            }}
             
             /* Sidebar */
             .sidebar-header {{ 
