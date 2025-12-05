@@ -4,6 +4,8 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
 import numpy as np
+import re
+import ast
 
 # Import styling
 from app import get_theme_css, render_sidebar, render_theme_toggle
@@ -14,22 +16,28 @@ st.set_page_config(
     layout="wide"
 )
 
-current_theme = st.session_state.get("theme", "dark")
-if "animate_header" not in st.session_state:
-    st.session_state["animate_header"] = True
-animate_header = st.session_state.get("animate_header", True)
-st.markdown(get_theme_css(current_theme, animated=animate_header), unsafe_allow_html=True)
-render_theme_toggle()
+# Load data from main app
+if "data" not in st.session_state:
+    st.warning("⚠️ Please go to the Dashboard first to load data")
+    if st.button("Go to Dashboard"):
+        st.switch_page("app.py")
+    st.stop()
 
 data = st.session_state.get("data", {})
 
 # Initialize theme
 if "theme" not in st.session_state:
-    st.session_state["theme"] = "light"
+    st.session_state["theme"] = "dark"
 
-current_theme = st.session_state.get("theme", "light")
-st.markdown(get_theme_css(current_theme), unsafe_allow_html=True)
+if "animate_header" not in st.session_state:
+    st.session_state["animate_header"] = True
 
+current_theme = st.session_state.get("theme", "dark")
+animate_header = st.session_state.get("animate_header", True)
+st.markdown(get_theme_css(current_theme, animated=animate_header), unsafe_allow_html=True)
+
+# Theme toggle at top right
+render_theme_toggle()
 
 # Sidebar filters
 selected_countries, selected_sports, selected_continent, medal_filters = render_sidebar(active_page="athlete", data=data)
@@ -38,9 +46,17 @@ st.session_state['selected_sports'] = selected_sports
 st.session_state['selected_continent'] = selected_continent
 st.session_state['medal_filters'] = medal_filters
 
+# Page header
 banner_class = "olympic-banner-animated" if animate_header else "olympic-banner"
 st.markdown(f"""
     <div class="{banner_class}">
+        <div class="olympic-rings">
+            <span class="ring ring-blue"></span>
+            <span class="ring ring-yellow"></span>
+            <span class="ring ring-black"></span>
+            <span class="ring ring-green"></span>
+            <span class="ring ring-red"></span>
+        </div>
         <div class="olympic-banner-text">
             <h1 class="main-header">👤 Athlete Performance</h1>
             <p class="sub-header">Individual profiles and demographic analysis</p>
@@ -57,23 +73,201 @@ medals_data = data.get('medals', pd.DataFrame())
 medallists_data = data.get('medallists', pd.DataFrame())
 events_data = data.get('events', pd.DataFrame())
 
+# Vérifier si les données sont chargées
+if athletes_data.empty:
+    st.error("❌ No athlete data loaded. Please return to the Dashboard.")
+    if st.button("Return to Dashboard"):
+        st.switch_page("app.py")
+    st.stop()
 
-# Appliquer les filtres aux athlètes
+# ============================================================
+# FONCTIONS POUR EXTRACTION DE DONNÉES
+# ============================================================
+def extract_weight_from_string(text):
+    """
+    Extrait le poids d'une chaîne de caractères.
+    Exemples: "Men -60 kg", "Women's +78kg", "100kg", "68-73 kg"
+    """
+    if not isinstance(text, str) or pd.isna(text):
+        return None
+    
+    text_lower = text.lower()
+    
+    # 1. Chercher les plages de poids (deux nombres séparés par un tiret)
+    range_pattern = r'(\d+\.?\d*)\s*-\s*(\d+\.?\d*)\s*kg'
+    range_match = re.search(range_pattern, text_lower)
+    if range_match:
+        try:
+            weight1 = float(range_match.group(1))
+            weight2 = float(range_match.group(2))
+            avg_weight = (weight1 + weight2) / 2
+            return round(avg_weight, 1)
+        except:
+            pass
+    
+    # 2. Chercher les poids simples
+    simple_patterns = [
+        r'[-+]*(\d+\.?\d*)\s*kg\b',  # -60 kg, +78kg, 100.5 kg
+        r'(\d+\.?\d*)\s*kilograms?\b',
+        r'(\d+\.?\d*)\s*kgs?\b',
+    ]
+    
+    for pattern in simple_patterns:
+        match = re.search(pattern, text_lower)
+        if match:
+            try:
+                weight = float(match.group(1))
+                return round(weight, 1)
+            except:
+                continue
+    
+    # 3. Chercher les livres et convertir
+    lb_patterns = [
+        r'(\d+)\s*lbs?\b',
+        r'(\d+)\s*pounds?\b'
+    ]
+    
+    for pattern in lb_patterns:
+        match = re.search(pattern, text_lower)
+        if match:
+            try:
+                weight_lbs = float(match.group(1))
+                weight_kg = weight_lbs * 0.453592
+                return round(weight_kg, 1)
+            except:
+                continue
+    
+    return None
+
+def extract_height_from_string(text):
+    """
+    Extrait la taille d'une chaîne de caractères.
+    Exemples: "180 cm", "1.80m", "5'11""
+    """
+    if not isinstance(text, str) or pd.isna(text):
+        return None
+    
+    text_lower = text.lower()
+    
+    patterns = [
+        r'(\d+\.?\d*)\s*cm\b',  # 180 cm
+        r'(\d+\.?\d*)\s*centimeters?\b',
+        r'(\d+)\.(\d+)\s*m\b',  # 1.80 m
+        r'(\d+)\'(\d+)\s*["\']?\b',  # 5'11"
+        r'height[:\s]*(\d+\.?\d*)\s*(cm|m)',
+        r'(\d+)\s*(cm|centimeter|m|meter)'
+    ]
+    
+    for pattern in patterns:
+        matches = re.findall(pattern, text_lower)
+        if matches:
+            try:
+                if "'" in text_lower:  # Pieds/pouces
+                    feet = float(matches[0][0])
+                    inches = float(matches[0][1])
+                    height_cm = (feet * 30.48) + (inches * 2.54)
+                    return round(height_cm, 1)
+                elif 'm' in text_lower and '.' in text_lower:  # Mètres
+                    meters = float(f"{matches[0][0]}.{matches[0][1]}")
+                    height_cm = meters * 100
+                    return round(height_cm, 1)
+                else:  # Centimètres
+                    height = float(matches[0][0])
+                    if 'm' in text_lower and height < 3:
+                        height = height * 100
+                    return round(height, 1)
+            except:
+                continue
+    
+    return None
+
+def parse_events_string(events_str):
+    """
+    Parse la chaîne d'événements qui peut être une liste Python ou une chaîne simple.
+    """
+    if pd.isna(events_str):
+        return []
+    
+    if isinstance(events_str, str):
+        if events_str.startswith('[') and events_str.endswith(']'):
+            try:
+                return ast.literal_eval(events_str)
+            except:
+                pass
+        return [events_str]
+    
+    if isinstance(events_str, list):
+        return events_str
+    
+    return []
+
+def get_athlete_weight_from_events(events_data):
+    """
+    Extrait le poids d'un athlète à partir de ses événements.
+    """
+    if pd.isna(events_data) or not events_data:
+        return None
+    
+    events_list = parse_events_string(events_data)
+    
+    weights = []
+    for event in events_list:
+        event_str = str(event)
+        weight = extract_weight_from_string(event_str)
+        if weight and weight > 30:  # Filtre pour éviter les valeurs aberrantes
+            weights.append(weight)
+    
+    if weights:
+        avg_weight = sum(weights) / len(weights)
+        return round(avg_weight, 1)
+    
+    return None
+
+def get_athlete_height_from_data(height_data, events_data):
+    """
+    Extrait la taille d'un athlète.
+    """
+    if not pd.isna(height_data) and height_data != 0 and height_data != '0':
+        try:
+            height = float(height_data)
+            if height > 100:  # Supposons que c'est en cm
+                return round(height, 1)
+            elif height > 1:  # Supposons que c'est en mètres
+                return round(height * 100, 1)
+        except:
+            pass
+    
+    events_list = parse_events_string(events_data)
+    heights = []
+    
+    for event in events_list:
+        height = extract_height_from_string(str(event))
+        if height and height > 100:  # Filtrer les valeurs < 100cm
+            heights.append(height)
+    
+    if heights:
+        avg_height = sum(heights) / len(heights)
+        return round(avg_height, 1)
+    
+    return None
+
+# ============================================================
+# APPLIQUER LES FILTRES
+# ============================================================
 filtered_athletes = athletes_data.copy()
 
 # Identifier les colonnes correctes
 country_col = 'country_long' if 'country_long' in filtered_athletes.columns else 'country'
-name_col = 'name'  # On a confirmé que cette colonne existe
+name_col = 'name'
 disciplines_col = 'disciplines' if 'disciplines' in filtered_athletes.columns else None
+events_col = 'events' if 'events' in filtered_athletes.columns else None
+height_col = 'height' if 'height' in filtered_athletes.columns else None
 
 # Appliquer les filtres si les colonnes existent
 if selected_countries and country_col in filtered_athletes.columns:
     filtered_athletes = filtered_athletes[filtered_athletes[country_col].isin(selected_countries)]
 
-# Note: On ne peut pas filtrer par sport car la colonne n'existe pas dans athletes.csv
-# On peut filtrer par discipline si nécessaire
 if selected_sports and disciplines_col and disciplines_col in filtered_athletes.columns:
-    # Vérifier si la discipline contient le sport sélectionné
     filtered_athletes = filtered_athletes[
         filtered_athletes[disciplines_col].str.contains('|'.join(selected_sports), case=False, na=False)
     ]
@@ -89,7 +283,6 @@ st.markdown("""
 col1, col2 = st.columns([2, 1])
 with col1:
     if not filtered_athletes.empty and name_col:
-        # Trier les noms pour faciliter la recherche
         athlete_names = sorted(filtered_athletes[name_col].dropna().unique())
         selected_athlete = st.selectbox(
             "🔍 Search for an athlete:",
@@ -113,7 +306,7 @@ if selected_athlete and not filtered_athletes.empty:
     athlete_rows = filtered_athletes[filtered_athletes[name_col] == selected_athlete]
     
     if not athlete_rows.empty:
-        athlete_info = athlete_rows.iloc[0]  # Prendre le premier résultat
+        athlete_info = athlete_rows.iloc[0]
         
         st.markdown("---")
         
@@ -121,7 +314,6 @@ if selected_athlete and not filtered_athletes.empty:
         col1, col2, col3 = st.columns([1, 2, 1])
         
         with col1:
-            # Image de profil avec initiales
             initials = ''.join([name[0] for name in selected_athlete.split()[:2]]).upper() if ' ' in selected_athlete else selected_athlete[:2].upper()
             st.markdown(f"""
             <div style="
@@ -139,11 +331,9 @@ if selected_athlete and not filtered_athletes.empty:
             """, unsafe_allow_html=True)
         
         with col2:
-            # Informations de base
             country_display = athlete_info.get(country_col, 'Unknown')
             disciplines_display = athlete_info.get(disciplines_col, 'Not specified')
             
-            # Chercher le sport à partir des événements ou des médaillés
             sport_info = "Not specified"
             if not medallists_data.empty and 'name' in medallists_data.columns and 'discipline' in medallists_data.columns:
                 athlete_disciplines = medallists_data[medallists_data['name'] == selected_athlete]['discipline'].unique()
@@ -160,33 +350,52 @@ if selected_athlete and not filtered_athletes.empty:
             """, unsafe_allow_html=True)
         
         with col3:
-            # Statistiques physiques
             st.markdown("""
             <div style="padding: 20px;">
                 <h4 style="color: #FFD700; margin-bottom: 10px;">Physical Stats</h4>
             """, unsafe_allow_html=True)
             
-            height = athlete_info.get('height', 'N/A')
-            weight = athlete_info.get('weight', 'N/A')
+            # Récupérer les données
+            height_data = athlete_info.get(height_col) if height_col else None
+            events_data = athlete_info.get(events_col) if events_col else None
+            disciplines_data = athlete_info.get(disciplines_col, '')
             
-            # Formater les valeurs
-            if pd.notna(height) and height != 'N/A':
-                height_display = f"{height} cm" if isinstance(height, (int, float)) else str(height)
+            # 1. Calculer la taille
+            calculated_height = get_athlete_height_from_data(height_data, events_data)
+            
+            if calculated_height:
+                height_display = f"{calculated_height} cm"
+                height_source = "extracted from data"
             else:
                 height_display = "N/A"
-                
-            if pd.notna(weight) and weight != 'N/A':
-                weight_display = f"{weight} kg" if isinstance(weight, (int, float)) else str(weight)
+                height_source = "data not available"
+            
+            # 2. Calculer le poids
+            calculated_weight = get_athlete_weight_from_events(events_data)
+            
+            if calculated_weight:
+                weight_display = f"{calculated_weight} kg"
+                weight_source = "extracted from events"
             else:
-                weight_display = "N/A"
+                discipline_weight = extract_weight_from_string(str(disciplines_data))
+                if discipline_weight and discipline_weight > 30:
+                    weight_display = f"{discipline_weight} kg"
+                    weight_source = "extracted from discipline"
+                else:
+                    weight_display = "N/A"
+                    weight_source = "data not available"
             
-            st.metric("📏 Height", height_display)
-            st.metric("⚖️ Weight", weight_display)
+            # Afficher les métriques avec tooltip
+            st.metric("📏 Height", height_display, 
+                     help=f"Source: {height_source}")
+            st.metric("⚖️ Weight", weight_display,
+                     help=f"Source: {weight_source}")
             
-            # Afficher le genre si disponible
             gender = athlete_info.get('gender', 'N/A')
             if pd.notna(gender) and gender != 'N/A':
                 st.metric("👤 Gender", gender)
+            else:
+                st.metric("👤 Gender", "N/A")
             
             st.markdown("</div>", unsafe_allow_html=True)
         
@@ -196,14 +405,11 @@ if selected_athlete and not filtered_athletes.empty:
         col1, col2 = st.columns(2)
         
         with col1:
-            # Informations sur l'entraîneur
             st.markdown("### 👨‍🏫 Coach Information")
-            if not coaches_data.empty:
-                # Chercher les entraîneurs par pays
+            if not coaches_data.empty and country_col in coaches_data.columns:
                 coaches_from_country = coaches_data[coaches_data[country_col] == country_display]
                 
                 if not coaches_from_country.empty:
-                    # Prendre les 5 premiers entraîneurs
                     for idx, coach in coaches_from_country.head(5).iterrows():
                         coach_name = coach.get('name', 'Unknown')
                         coach_country = coach.get(country_col, 'Unknown')
@@ -216,30 +422,50 @@ if selected_athlete and not filtered_athletes.empty:
                 st.info("Coach data not available")
         
         with col2:
-            # Informations additionnelles
             st.markdown("### 📝 Additional Information")
             
-            # Date de naissance
             birth_date = athlete_info.get('birth_date', 'N/A')
             if pd.notna(birth_date) and birth_date != 'N/A':
                 st.write(f"**Birth Date:** {birth_date}")
             
-            # Lieu de naissance
             birth_place = athlete_info.get('birth_place', 'N/A')
             if pd.notna(birth_place) and birth_place != 'N/A':
                 st.write(f"**Birth Place:** {birth_place}")
             
-            # Nationalité
             nationality = athlete_info.get('nationality_long', athlete_info.get('nationality', 'N/A'))
             if pd.notna(nationality) and nationality != 'N/A':
                 st.write(f"**Nationality:** {nationality}")
             
-            # Événements
-            events = athlete_info.get('events', 'N/A')
-            if pd.notna(events) and events != 'N/A':
-                st.write(f"**Events:** {events}")
+            # Afficher les événements formatés
+            if events_col and events_col in athlete_info:
+                events_data = athlete_info[events_col]
+                if pd.notna(events_data) and events_data != 'N/A':
+                    try:
+                        if isinstance(events_data, str) and events_data.startswith('['):
+                            events_list = ast.literal_eval(events_data)
+                            if isinstance(events_list, list) and events_list:
+                                st.write("**Events:**")
+                                for event in events_list:
+                                    event_str = str(event)
+                                    weight = extract_weight_from_string(event_str)
+                                    if weight and weight > 30:
+                                        st.write(f"• {event_str} (≈{weight} kg)")
+                                    else:
+                                        st.write(f"• {event_str}")
+                        else:
+                            event_str = str(events_data)
+                            weight = extract_weight_from_string(event_str)
+                            if weight and weight > 30:
+                                st.write(f"**Events:** {event_str} (≈{weight} kg)")
+                            else:
+                                st.write(f"**Events:** {event_str}")
+                    except:
+                        st.write(f"**Events:** {events_data}")
+                else:
+                    st.write("**Events:** N/A")
+            else:
+                st.write("**Events:** N/A")
             
-            # Team information - essayer de trouver dans teams.csv
             if not teams_data.empty and 'name' in teams_data.columns:
                 athlete_teams = teams_data[teams_data['name'] == selected_athlete]
                 if not athlete_teams.empty:
@@ -247,17 +473,26 @@ if selected_athlete and not filtered_athletes.empty:
                     for _, team in athlete_teams.iterrows():
                         team_name = team.get('team_name', team.get('team', 'Unknown'))
                         st.write(f"• {team_name}")
+                else:
+                    st.write("**Team(s):** N/A")
+            else:
+                st.write("**Team(s):** N/A")
         
         # Informations sur les médailles
         st.markdown("---")
         st.markdown("### 🏅 Medal Achievements")
         
-        if not medallists_data.empty and 'name' in medallists_data.columns:
+        if not medallists_data.empty and 'name' in medallists_data.columns and 'medal_type' in medallists_data.columns:
             athlete_medals = medallists_data[medallists_data['name'] == selected_athlete]
             
             if not athlete_medals.empty:
-                # Compter les médailles par type
-                medal_counts = athlete_medals['medal_type'].value_counts()
+                athlete_medals['medal_type_clean'] = athlete_medals['medal_type'].astype(str).str.strip()
+                
+                medal_counts = {
+                    'Gold': (athlete_medals['medal_type_clean'] == 'Gold Medal').sum(),
+                    'Silver': (athlete_medals['medal_type_clean'] == 'Silver Medal').sum(),
+                    'Bronze': (athlete_medals['medal_type_clean'] == 'Bronze Medal').sum()
+                }
                 
                 col1, col2, col3 = st.columns(3)
                 with col1:
@@ -270,17 +505,35 @@ if selected_athlete and not filtered_athletes.empty:
                     bronze_count = medal_counts.get('Bronze', 0)
                     st.metric("🥉 Bronze Medals", bronze_count)
                 
-                # Afficher les détails des médailles
                 st.markdown("#### Medal Details")
-                display_cols = ['medal_type', 'event', 'discipline', 'medal_date']
-                available_cols = [col for col in display_cols if col in athlete_medals.columns]
-                
-                if available_cols:
-                    st.dataframe(
-                        athlete_medals[available_cols].sort_values('medal_type', ascending=False),
-                        use_container_width=True,
-                        hide_index=True
+                if 'event' in athlete_medals.columns:
+                    display_data = athlete_medals.copy()
+                    
+                    display_data['Weight (kg)'] = display_data.apply(
+                        lambda row: extract_weight_from_string(str(row.get('event', ''))), 
+                        axis=1
                     )
+                    
+                    display_data['Weight (kg)'] = display_data['Weight (kg)'].apply(
+                        lambda x: x if x and x > 10 else None
+                    )
+                    
+                    display_cols = ['medal_type', 'event', 'discipline', 'Weight (kg)', 'medal_date']
+                    available_cols = [col for col in display_cols if col in display_data.columns]
+                    
+                    if available_cols:
+                        st.dataframe(
+                            display_data[available_cols].sort_values('medal_type', ascending=False),
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                'Weight (kg)': st.column_config.NumberColumn(
+                                    format="%.1f kg"
+                                )
+                            }
+                        )
+                else:
+                    st.info("No event details available")
             else:
                 st.info(f"No medals found for {selected_athlete}")
         else:
@@ -295,23 +548,28 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+# Recharger filtered_athletes pour l'analyse d'âge
+filtered_athletes = athletes_data.copy()
+if selected_countries and country_col in filtered_athletes.columns:
+    filtered_athletes = filtered_athletes[filtered_athletes[country_col].isin(selected_countries)]
+if selected_sports and disciplines_col and disciplines_col in filtered_athletes.columns:
+    filtered_athletes = filtered_athletes[
+        filtered_athletes[disciplines_col].str.contains('|'.join(selected_sports), case=False, na=False)
+    ]
+
 if not filtered_athletes.empty:
-    # Essayer de calculer l'âge à partir de la date de naissance
     if 'birth_date' in filtered_athletes.columns:
         try:
-            # Convertir la date de naissance
             filtered_athletes['birth_date_parsed'] = pd.to_datetime(filtered_athletes['birth_date'], errors='coerce')
-            current_year = 2024  # Année des Jeux Olympiques
+            current_year = 2024
             filtered_athletes['age'] = current_year - filtered_athletes['birth_date_parsed'].dt.year
             
-            # Nettoyer les âges invalides
             filtered_athletes = filtered_athletes[filtered_athletes['age'].between(10, 60)]
             
             if not filtered_athletes.empty and filtered_athletes['age'].notna().sum() > 0:
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    # Box plot par genre
                     if 'gender' in filtered_athletes.columns:
                         fig = px.box(
                             filtered_athletes,
@@ -329,7 +587,6 @@ if not filtered_athletes.empty:
                         )
                         st.plotly_chart(fig, use_container_width=True)
                     else:
-                        # Histogramme simple
                         fig = px.histogram(
                             filtered_athletes,
                             x='age',
@@ -341,7 +598,6 @@ if not filtered_athletes.empty:
                         st.plotly_chart(fig, use_container_width=True)
                 
                 with col2:
-                    # Statistiques d'âge
                     st.markdown("### 📈 Age Statistics")
                     
                     age_stats = filtered_athletes['age'].describe()
@@ -357,7 +613,6 @@ if not filtered_athletes.empty:
                         st.metric("👴 Oldest", int(age_stats['max']))
                         st.metric("📐 Age Range", f"{int(age_stats['max'] - age_stats['min'])}")
                     
-                    # Distribution par groupe d'âge
                     st.markdown("#### Age Groups")
                     age_bins = [10, 20, 25, 30, 35, 40, 50, 60]
                     age_labels = ['10-19', '20-24', '25-29', '30-34', '35-39', '40-49', '50-60']
@@ -406,14 +661,21 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+# Recharger filtered_athletes pour l'analyse de genre
+filtered_athletes = athletes_data.copy()
+if selected_countries and country_col in filtered_athletes.columns:
+    filtered_athletes = filtered_athletes[filtered_athletes[country_col].isin(selected_countries)]
+if selected_sports and disciplines_col and disciplines_col in filtered_athletes.columns:
+    filtered_athletes = filtered_athletes[
+        filtered_athletes[disciplines_col].str.contains('|'.join(selected_sports), case=False, na=False)
+    ]
+
 if not filtered_athletes.empty and 'gender' in filtered_athletes.columns:
     col1, col2 = st.columns(2)
     
     with col1:
-        # Distribution globale
         gender_counts = filtered_athletes['gender'].value_counts()
         
-        # Normaliser les labels
         gender_labels = {
             'M': 'Male', 'F': 'Female',
             'Male': 'Male', 'Female': 'Female',
@@ -431,17 +693,12 @@ if not filtered_athletes.empty and 'gender' in filtered_athletes.columns:
         st.plotly_chart(fig, use_container_width=True)
     
     with col2:
-        # Distribution par pays (Top 10)
         if country_col in filtered_athletes.columns:
-            # Préparer les données pour le top 10 des pays
             top_countries = filtered_athletes[country_col].value_counts().head(10).index.tolist()
             country_gender_data = filtered_athletes[filtered_athletes[country_col].isin(top_countries)]
             
             if not country_gender_data.empty:
-                # Grouper par pays et genre
                 gender_by_country = country_gender_data.groupby([country_col, 'gender']).size().reset_index(name='count')
-                
-                # Normaliser les labels de genre
                 gender_by_country['gender'] = gender_by_country['gender'].map(lambda x: gender_labels.get(x, x))
                 
                 fig = px.bar(
@@ -477,26 +734,47 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 if not medallists_data.empty and 'name' in medallists_data.columns and 'medal_type' in medallists_data.columns:
-    # Préparer les données pour les médailles
-    # Grouper par athlète et compter les médailles
-    medal_summary = medallists_data.groupby('name').apply(lambda x: pd.Series({
-        'Gold': (x['medal_type'] == 'Gold').sum(),
-        'Silver': (x['medal_type'] == 'Silver').sum(),
-        'Bronze': (x['medal_type'] == 'Bronze').sum(),
-        'Total': len(x)
-    })).reset_index()
+    filtered_medallists = medallists_data.copy()
     
-    # Filtrer par pays si sélectionné
-    if selected_countries and 'country_long' in medallists_data.columns:
-        # Obtenir les athlètes du pays sélectionné
-        country_athletes = medallists_data[medallists_data['country_long'].isin(selected_countries)]['name'].unique()
-        medal_summary = medal_summary[medal_summary['name'].isin(country_athletes)]
+    if selected_countries:
+        country_cols_to_try = ['country_long', 'country', 'country_name', 'nationality', 'Team_Country']
+        country_col_found = None
+        
+        for col in country_cols_to_try:
+            if col in filtered_medallists.columns:
+                country_col_found = col
+                break
+        
+        if country_col_found:
+            filtered_medallists = filtered_medallists[
+                filtered_medallists[country_col_found].isin(selected_countries)
+            ]
     
-    # Prendre les 10 meilleurs athlètes
-    top_athletes = medal_summary.nlargest(10, 'Total')
+    filtered_medallists['medal_type_clean'] = filtered_medallists['medal_type'].astype(str).str.strip()
     
-    if not top_athletes.empty:
-        # Créer le graphique
+    medal_summary = []
+    
+    for name in filtered_medallists['name'].unique():
+        athlete_medals = filtered_medallists[filtered_medallists['name'] == name]
+        
+        gold_count = (athlete_medals['medal_type_clean'] == 'Gold Medal').sum()
+        silver_count = (athlete_medals['medal_type_clean'] == 'Silver Medal').sum()
+        bronze_count = (athlete_medals['medal_type_clean'] == 'Bronze Medal').sum()
+        total_count = len(athlete_medals)
+        
+        medal_summary.append({
+            'name': name,
+            'Gold': gold_count,
+            'Silver': silver_count,
+            'Bronze': bronze_count,
+            'Total': total_count
+        })
+    
+    medal_summary_df = pd.DataFrame(medal_summary)
+    
+    if not medal_summary_df.empty:
+        top_athletes = medal_summary_df.nlargest(10, 'Total')
+        
         fig = go.Figure()
         
         fig.add_trace(go.Bar(
@@ -539,22 +817,37 @@ if not medallists_data.empty and 'name' in medallists_data.columns and 'medal_ty
         
         st.plotly_chart(fig, use_container_width=True)
         
-        # Tableau détaillé
         st.markdown("### 📋 Top Athletes Details")
         
-        # Ajouter le pays si disponible
         display_data = top_athletes.copy()
         
-        # Essayer d'ajouter le pays
-        if 'country_long' in medallists_data.columns:
-            country_map = medallists_data.groupby('name')['country_long'].first()
-            display_data['Country'] = display_data['name'].map(country_map).fillna('Unknown')
+        country_col_found = None
+        country_cols_to_try = ['country_long', 'country', 'country_name', 'nationality', 'Team_Country']
+        
+        for col in country_cols_to_try:
+            if col in filtered_medallists.columns:
+                country_col_found = col
+                break
+        
+        if country_col_found:
+            country_mapping = {}
+            for name in display_data['name']:
+                athlete_data = filtered_medallists[filtered_medallists['name'] == name]
+                if not athlete_data.empty:
+                    country = athlete_data.iloc[0][country_col_found]
+                    country_mapping[name] = country
+                else:
+                    country_mapping[name] = 'Unknown'
+            
+            display_data['Country'] = display_data['name'].map(country_mapping)
             display_columns = ['name', 'Country', 'Gold', 'Silver', 'Bronze', 'Total']
+            column_names = ['Athlete', 'Country', '🥇 Gold', '🥈 Silver', '🥉 Bronze', 'Total Medals']
         else:
             display_columns = ['name', 'Gold', 'Silver', 'Bronze', 'Total']
+            column_names = ['Athlete', '🥇 Gold', '🥈 Silver', '🥉 Bronze', 'Total Medals']
         
         display_data = display_data[display_columns]
-        display_data.columns = ['Athlete', 'Country', '🥇 Gold', '🥈 Silver', '🥉 Bronze', 'Total Medals'] if 'Country' in display_columns else ['Athlete', '🥇 Gold', '🥈 Silver', '🥉 Bronze', 'Total Medals']
+        display_data.columns = column_names
         
         st.dataframe(
             display_data.sort_values('Total Medals', ascending=False),
