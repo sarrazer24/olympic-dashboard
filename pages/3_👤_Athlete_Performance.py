@@ -50,13 +50,6 @@ st.session_state['medal_filters'] = medal_filters
 banner_class = "olympic-banner-animated" if animate_header else "olympic-banner"
 st.markdown(f"""
     <div class="{banner_class}">
-        <div class="olympic-rings">
-            <span class="ring ring-blue"></span>
-            <span class="ring ring-yellow"></span>
-            <span class="ring ring-black"></span>
-            <span class="ring ring-green"></span>
-            <span class="ring ring-red"></span>
-        </div>
         <div class="olympic-banner-text">
             <h1 class="main-header">👤 Athlete Performance</h1>
             <p class="sub-header">Individual profiles and demographic analysis</p>
